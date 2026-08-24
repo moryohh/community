@@ -1,0 +1,6 @@
+{
+  "name": "Supabase OCR Manager & Matcher",
+  "description": "منظومة معالجة صور OCR واستخراج النصوص وتوليد معرف فريد ومقارنة السؤال بالجواب مع إدارة وتوزيع الحمل لمشاريع وقواعد بيانات Supabase.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
