@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   Shield,
   Eye,
@@ -37,6 +37,7 @@ import {
 import { FacebookPost, FacebookComment } from '../types';
 import { importCommunityJsonData, getStoredAuthToken, setStoredAuthToken } from '../api';
 import { DashboardAdminsManagement } from './DashboardAdminsManagement';
+import { SupabaseAdminLogin } from './SupabaseAdminLogin';
 
 interface CommunityAdminDashboardProps {
   posts: FacebookPost[];
@@ -75,6 +76,11 @@ export function CommunityAdminDashboard({
   const [sessionToken, setSessionToken] = useState<string>(() => getStoredAuthToken());
   const [isTokenModalOpen, setIsTokenModalOpen] = useState<boolean>(false);
   const [tempTokenInput, setTempTokenInput] = useState<string>('');
+
+  const handleSupabaseSessionChange = useCallback((token: string) => {
+    setSessionToken(token);
+    setStoredAuthToken(token);
+  }, []);
 
   // Direct Community JSON Importer State
   const [isCommunityJsonModalOpen, setIsCommunityJsonModalOpen] = useState<boolean>(false);
@@ -222,6 +228,8 @@ export function CommunityAdminDashboard({
 
   return (
     <div className="space-y-6">
+      <SupabaseAdminLogin onSessionChange={handleSupabaseSessionChange} />
+
       {/* ========================================================================= */}
       {/* 1. TOP DUAL-MODE BANNER (مفتاح تبديل الوضع بين: لوحة الإدارة ومعاينة المستخدم) */}
       {/* ========================================================================= */}
@@ -1067,7 +1075,7 @@ export function CommunityAdminDashboard({
                       comments: parsed.comments || [],
                       default_group_name: batchTargetGroup,
                       auto_publish: batchAutoApprove,
-                    });
+                    }, sessionToken);
 
                     setBatchSuccessMsg(res.message);
                     setBatchReport(res.report);

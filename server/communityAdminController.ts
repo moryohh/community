@@ -410,7 +410,7 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
       }
 
       // Author name normalization & Profile resolution
-      const rawAuthorName = (item.author_display_name || item.author_name || item.author || item.userName || item.name || 'أستاذ المادة / ناشر معتمد').toString().trim();
+      const rawAuthorName = (item.author_display_name || item.author_name || item.author || item.userName || item.name || item.user?.name || 'أستاذ المادة / ناشر معتمد').toString().trim();
       const normalizedAuthorName = normalizeBotAuthorName(rawAuthorName);
       const authorNameKey = createAuthorNameKey(normalizedAuthorName);
 
@@ -484,9 +484,9 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
         reports_count: 0,
         reactions_count: Number(item.reactions_count || item.likes_count || item.likes || 0),
         group_id: item.group_id || defaultGroupId,
-        group_name: item.group_name || defaultGroupName,
+        group_name: item.group_name || item.groupTitle || defaultGroupName,
         group_url: item.group_url || 'https://facebook.com/groups/curriculum2026',
-        post_url: item.post_url || `https://facebook.com/groups/posts/${pid}`,
+        post_url: item.post_url || item.url || `https://facebook.com/groups/posts/${pid}`,
         source_post_id: item.source_post_id || pid,
         source_api: 'manual_json_import',
         fetched_at: item.fetched_at || new Date().toISOString(),
@@ -519,7 +519,7 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
         }
 
         // Author name & Profile for comment
-        const rawCAuthor = (c.author_name || c.author_display_name || c.userName || c.name || 'المساعد الذكي (Bot)').toString().trim();
+        const rawCAuthor = (c.author_name || c.author_display_name || c.userName || c.name || c.profileName || c.profile_name || 'المساعد الذكي (Bot)').toString().trim();
         const normCAuthor = normalizeBotAuthorName(rawCAuthor);
         const cNameKey = createAuthorNameKey(normCAuthor);
 
@@ -603,7 +603,7 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
         skippedReasons.push(`تم تجاهل user_id بشري (${c.user_id}) في التعليق المنفصل رقم ${cIdx + 1}.`);
       }
 
-      const rawCAuthor = (c.author_name || c.author_display_name || c.userName || c.name || 'المساعد الذكي (Bot)').toString().trim();
+      const rawCAuthor = (c.author_name || c.author_display_name || c.userName || c.name || c.profileName || c.profile_name || 'المساعد الذكي (Bot)').toString().trim();
       const normCAuthor = normalizeBotAuthorName(rawCAuthor);
       const cNameKey = createAuthorNameKey(normCAuthor);
 
