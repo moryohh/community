@@ -891,7 +891,7 @@ export function CommunityAdminDashboard({
                     </div>
                     <div className="p-2.5 bg-slate-800/80 rounded-lg border border-slate-700">
                       <div className="text-[10px] text-slate-400 font-bold">ردود البوتات (Bot)</div>
-                      <div className="text-base font-black text-amber-400">{batchReport.comments?.bot_comments || 0}</div>
+                      <div className="text-base font-black text-amber-400">{batchReport.bot_comments ?? batchReport.comments?.bot_comments ?? 0}</div>
                       <div className="text-[9px] text-amber-300/70">تمت معالجتها</div>
                     </div>
                     <div className="p-2.5 bg-slate-800/80 rounded-lg border border-slate-700">

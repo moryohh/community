@@ -10,6 +10,56 @@ import {
   generateDeterministicCommentId,
 } from './communityProfiles';
 
+function isUsableMediaUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const url = value.trim();
+  if (!(url.startsWith('http://') || url.startsWith('https://'))) return false;
+  // A Facebook photo page is not an image file; use photo_image.uri/thumbnail instead.
+  if (url.toLowerCase().includes('facebook.com/photo/')) return false;
+  return true;
+}
+
+function extractMediaUrls(item: any): string[] {
+  const urls: string[] = [];
+  const add = (value: unknown) => {
+    if (isUsableMediaUrl(value)) urls.push(value.trim());
+  };
+
+  const addCollection = (collection: unknown) => {
+    if (!Array.isArray(collection)) return;
+    for (const entry of collection) {
+      if (typeof entry === 'string') {
+        add(entry);
+        continue;
+      }
+      if (!entry || typeof entry !== 'object') continue;
+      add((entry as any).url);
+      add((entry as any).image);
+      add((entry as any).src);
+      add((entry as any).thumbnail);
+      add((entry as any).photo_image?.uri);
+      add((entry as any).photo_image?.url);
+      add((entry as any).media_url);
+    }
+  };
+
+  addCollection(item?.media_urls);
+  addCollection(item?.media);
+  addCollection(item?.images);
+  addCollection(item?.attachments);
+  add(item?.imageUrl);
+  add(item?.image_url);
+  add(item?.image);
+  add(item?.photo);
+  add(item?.media_url);
+
+  return Array.from(new Set(urls)).slice(0, 4);
+}
+
+function commentContainsMedia(comment: any): boolean {
+  return extractMediaUrls(comment).length > 0;
+}
+
 // =========================================================================
 // 1. GET /api/v1/community/admin/posts - ADMIN POST MATRIX (All Statuses)
 // =========================================================================
@@ -435,18 +485,8 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
 
       candidatePostIds.push(pid);
 
-      // Parse media
-      let mediaUrls: string[] = [];
-      if (Array.isArray(item.media_urls)) {
-        mediaUrls = item.media_urls.filter((u: any) => typeof u === 'string' && u.trim().length > 0);
-      } else if (Array.isArray(item.media)) {
-        mediaUrls = item.media.map((m: any) => typeof m === 'string' ? m : m.url || m.image || m.src).filter(Boolean);
-      } else if (Array.isArray(item.images)) {
-        mediaUrls = item.images.map((img: any) => typeof img === 'string' ? img : img.url || img.src).filter(Boolean);
-      } else if (item.imageUrl || item.image || item.photo || item.media_url) {
-        const u = item.imageUrl || item.image || item.photo || item.media_url;
-        if (typeof u === 'string' && u.trim()) mediaUrls = [u.trim()];
-      }
+      // Parse media, including Facebook scraper attachments[].photo_image.uri.
+      const mediaUrls = extractMediaUrls(item);
 
       const mediaObjects = mediaUrls.map((url, mIdx) => ({
         url,
@@ -481,10 +521,10 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
         media: mediaObjects,
         media_urls: mediaUrls,
         media_type: mediaUrls.length > 0 ? 'image' : 'none',
-        likes_count: Number(item.likes_count || item.reactions_count || item.likes || 0),
+        likes_count: Number(item.likes_count ?? item.likesCount ?? item.reactionLikeCount ?? item.reactions_count ?? item.reactionsCount ?? item.likes ?? 0),
         comments_count: 0, // Will be computed after comments processing
         reports_count: 0,
-        reactions_count: Number(item.reactions_count || item.likes_count || item.likes || 0),
+        reactions_count: Number(item.reactions_count ?? item.reactionsCount ?? item.topReactionsCount ?? item.likes_count ?? item.likesCount ?? item.reactionLikeCount ?? item.likes ?? 0),
         group_id: item.group_id || defaultGroupId,
         group_name: item.group_name || item.groupTitle || defaultGroupName,
         group_url: item.group_url || 'https://facebook.com/groups/curriculum2026',
@@ -511,6 +551,11 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
         const commentText = (c.comment_text || c.text || c.content || c.body || '').toString().trim();
         if (!commentText) {
           skippedCommentsCount++;
+          continue;
+        }
+        if (commentContainsMedia(c)) {
+          skippedCommentsCount++;
+          skippedReasons.push(`تم تخطي تعليق المنشور رقم ${i + 1} لأنه يحتوي على صورة أو مرفق؛ التعليقات العامة نصية فقط.`);
           continue;
         }
 
@@ -597,6 +642,11 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
       if (!commentText || !targetPostId) {
         skippedCommentsCount++;
         skippedReasons.push(`التعليق المنفصل رقم ${cIdx + 1} تم تخطيه لعدم وجود نص أو post_id`);
+        continue;
+      }
+      if (commentContainsMedia(c)) {
+        skippedCommentsCount++;
+        skippedReasons.push(`تم تخطي التعليق المنفصل رقم ${cIdx + 1} لأنه يحتوي على صورة أو مرفق؛ التعليقات العامة نصية فقط.`);
         continue;
       }
 
