@@ -549,6 +549,34 @@ export async function reportPost(req: AuthenticatedRequest, res: Response) {
         });
       }
 
+      // Daily quota: five distinct post reports per authenticated user per UTC calendar day.
+      const startOfDay = new Date();
+      startOfDay.setUTCHours(0, 0, 0, 0);
+      const { count: dailyReportCount, error: dailyCountError } = await db
+        .from('reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('reporter_user_id', user.id)
+        .eq('target_type', 'post')
+        .gte('created_at', startOfDay.toISOString())
+        .neq('status', 'dismissed');
+
+      if (dailyCountError) {
+        console.error('[Community Reports] Daily quota check failed:', dailyCountError.message);
+        return res.status(503).json({
+          success: false,
+          error: 'تعذر التحقق من حد البلاغات اليومية حالياً',
+          code: 'DATABASE_UNAVAILABLE',
+        });
+      }
+
+      if ((dailyReportCount ?? 0) >= 5) {
+        return res.status(429).json({
+          success: false,
+          error: 'وصلت إلى الحد الأقصى: خمسة بلاغات يومياً',
+          code: 'DAILY_REPORT_LIMIT_REACHED',
+        });
+      }
+
       const { error: insertError } = await db.from('reports').insert(reportRecord);
       if (insertError) {
         // PostgreSQL unique violation also protects against two simultaneous requests.
@@ -580,18 +608,13 @@ export async function reportPost(req: AuthenticatedRequest, res: Response) {
 
       const totalReports = reportCount ?? 1;
       const now = new Date().toISOString();
-      const postUpdate = totalReports >= 2
-        ? {
-            reports_count: totalReports,
-            status: 'deleted',
-            moderated_at: now,
-            moderated_by: 'automatic_report_threshold',
-            updated_at: now,
-          }
-        : {
-            reports_count: totalReports,
-            updated_at: now,
-          };
+      const postUpdate = {
+        reports_count: totalReports,
+        status: 'deleted',
+        moderated_at: now,
+        moderated_by: 'automatic_report_threshold_1',
+        updated_at: now,
+      };
 
       const { error: postUpdateError } = await db
         .from('posts')
@@ -609,11 +632,9 @@ export async function reportPost(req: AuthenticatedRequest, res: Response) {
 
       return res.json({
         success: true,
-        action: totalReports >= 2 ? 'deleted' : 'queued',
+        action: 'deleted',
         reports_count: totalReports,
-        message: totalReports >= 2
-          ? 'تم حذف المنشور تلقائياً بعد وصول بلاغين من مستخدمين مختلفين.'
-          : 'شكراً لك. تم استلام بلاغك وسيظهر المنشور في نهاية القائمة مؤقتاً.',
+        message: 'تم حذف المنشور تلقائياً بعد أول بلاغ.',
       });
     }
 
@@ -628,17 +649,32 @@ export async function reportPost(req: AuthenticatedRequest, res: Response) {
         code: 'REPORT_ALREADY_EXISTS',
       });
     }
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const dailyInMemoryCount = inMemoryReportsCache.filter(
+      (report) => report.reporter_user_id === user.id && report.target_type === 'post' && report.status !== 'dismissed' && new Date(report.created_at).getTime() >= startOfDay.getTime()
+    ).length;
+    if (dailyInMemoryCount >= 5) {
+      return res.status(429).json({
+        success: false,
+        error: 'وصلت إلى الحد الأقصى: خمسة بلاغات يومياً',
+        code: 'DAILY_REPORT_LIMIT_REACHED',
+      });
+    }
     inMemoryReportsCache.push(reportRecord);
     const inMemoryCount = inMemoryReportsCache.filter(
       (report) => report.post_id === id && report.target_type === 'post' && report.status !== 'dismissed'
     ).length;
+    const inMemoryPost = inMemoryPostsCache.find((post) => post.id === id);
+    if (inMemoryPost) {
+      inMemoryPost.status = 'deleted';
+      inMemoryPost.reports_count = inMemoryCount;
+    }
     res.json({
       success: true,
-      action: inMemoryCount >= 2 ? 'deleted' : 'queued',
+      action: 'deleted',
       reports_count: inMemoryCount,
-      message: inMemoryCount >= 2
-        ? 'تم حذف المنشور تلقائياً بعد وصول بلاغين من مستخدمين مختلفين.'
-        : 'شكراً لك. تم استلام بلاغك وسيظهر المنشور في نهاية القائمة مؤقتاً.',
+      message: 'تم حذف المنشور تلقائياً بعد أول بلاغ.',
     });
   } catch (err: any) {
     res.status(500).json({ error: `فشل تسجيل البلاغ: ${err.message}` });
