@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ThumbsUp,
   MessageCircle,
@@ -36,15 +36,96 @@ interface FacebookWatchFeedProps {
   isSyncing?: boolean;
 }
 
+function parsePostDate(post: Partial<FacebookPost>): number {
+  const value = post.post_created_at || post.postCreatedAt || post.postedAt || post.created_at || post.fetched_at;
+  if (!value) return Number.NEGATIVE_INFINITY;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
+function mapCommunityApiPost(raw: any): FacebookPost {
+  const originalDate = raw.created_at || raw.post_created_at || raw.postCreatedAt || raw.postedAt || raw.raw_data?.created_at || raw.raw_data?.createdAt || raw.raw_data?.time || raw.updated_at;
+  const comments = Array.isArray(raw.comments) ? raw.comments.map((comment: any) => ({
+    id: String(comment.id || ''),
+    post_id: String(comment.post_id || raw.id),
+    author_name: comment.author_name || comment.author_display_name || 'مستخدم المجتمع',
+    author_id: comment.author_id || undefined,
+    author_image_url: comment.author_image_url || comment.author_avatar || undefined,
+    comment_text: comment.comment_text || comment.content || comment.text || '',
+    comment_created_at: comment.created_at || comment.comment_created_at || comment.createdAt,
+    likes_count: Number(comment.likes_count || comment.likes || 0),
+    extracted_by_api: comment.extracted_by_api,
+  })) : [];
+
+  return {
+    id: String(raw.id),
+    source_post_id: raw.source_post_id || raw.id,
+    group_id: raw.group_id || '',
+    group_name: raw.group_name || raw.groupName,
+    group_url: raw.group_url || raw.groupUrl,
+    post_url: raw.post_url || raw.postUrl || '#',
+    post_text: raw.post_text || raw.content || '',
+    content: raw.content || raw.post_text || '',
+    author_name: raw.author_display_name || raw.author_name || raw.authorName || 'مستخدم المجتمع',
+    author_id: raw.user_id || raw.author_id || undefined,
+    author_profile_id: raw.author_profile_id,
+    profile_type: raw.source_type === 'manual_json_import' ? 'bot' : (raw.profile_type || 'user'),
+    is_bot: raw.source_type === 'manual_json_import' || String(raw.author_profile_id || '').startsWith('bot_'),
+    post_created_at: originalDate,
+    created_at: originalDate,
+    updated_at: raw.updated_at,
+    media_urls: Array.isArray(raw.media_urls) ? raw.media_urls : [],
+    media_type: raw.media_type || 'none',
+    author_avatar: raw.author_avatar_url || raw.author_avatar,
+    comments_count: Number(raw.comments_count || comments.length || 0),
+    reactions_count: Number(raw.reactions_count || 0),
+    likes_count: Number(raw.likes_count || 0),
+    source_api: raw.source_api || 'community_api',
+    source_type: raw.source_type || 'user',
+    status: raw.status,
+    fetched_at: raw.fetched_at,
+    raw_data: raw.raw_data,
+    comments,
+  };
+}
+
 export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
   onSyncPostToBase1,
   onBulkSync,
   isSyncing = false
 }) => {
-  // Local state for dataset
-  const [posts, setPosts] = useState<FacebookPost[]>(() =>
-    FACEBOOK_SCRAPED_DATASET.map(mapRawPostToFacebookPost)
-  );
+  // Live state loaded from Supabase B through the public Community API.
+  const [posts, setPosts] = useState<FacebookPost[]>([]);
+  const [isLoadingPosts, setIsLoadingPosts] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const loadCommunityPosts = async () => {
+    setIsLoadingPosts(true);
+    setLoadError(null);
+    try {
+      const response = await fetch('/api/v1/community/posts?limit=50', { cache: 'no-store' });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || 'تعذر جلب منشورات المجتمع من قاعدة B');
+      }
+      const livePosts = (Array.isArray(payload.posts) ? payload.posts : [])
+        .map(mapCommunityApiPost)
+        .sort((a: FacebookPost, b: FacebookPost) => {
+          const dateDifference = parsePostDate(b) - parsePostDate(a);
+          return dateDifference || String(b.id).localeCompare(String(a.id));
+        });
+      setPosts(livePosts);
+    } catch (error: any) {
+      setPosts([]);
+      setLoadError(error?.message || 'تعذر جلب منشورات المجتمع من قاعدة B');
+    } finally {
+      setIsLoadingPosts(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadCommunityPosts();
+  }, []);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'with_images' | 'with_comments' | 'text_only'>('all');
@@ -212,7 +293,7 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
   };
 
   const handleResetToDefault = () => {
-    setPosts(FACEBOOK_SCRAPED_DATASET.map(mapRawPostToFacebookPost));
+    void loadCommunityPosts();
   };
 
   return (
@@ -364,14 +445,29 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
 
       {/* Feed Column Container */}
       <div className="max-w-3xl mx-auto space-y-5">
-        {filteredPosts.length === 0 ? (
+        {isLoadingPosts ? (
+          <div className="bg-white rounded-2xl p-12 text-center border border-slate-200">
+            <RefreshCw className="w-7 h-7 mx-auto mb-3 text-[#1877F2] animate-spin" />
+            <h3 className="text-base font-bold text-slate-800 mb-1">جاري جلب أحدث المنشورات من قاعدة المجتمع</h3>
+          </div>
+        ) : loadError ? (
+          <div className="bg-white rounded-2xl p-12 text-center border border-rose-200">
+            <p className="text-sm font-bold text-rose-700 mb-3">{loadError}</p>
+            <button
+              onClick={() => void loadCommunityPosts()}
+              className="px-4 py-2 bg-[#1877F2] text-white text-xs font-bold rounded-xl hover:bg-blue-600 transition-colors"
+            >
+              إعادة المحاولة
+            </button>
+          </div>
+        ) : filteredPosts.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 text-center border border-slate-200">
             <div className="w-14 h-14 mx-auto rounded-full bg-blue-50 text-[#1877F2] flex items-center justify-center mb-3">
               <Search className="w-6 h-6" />
             </div>
             <h3 className="text-base font-bold text-slate-800 mb-1">لم يتم العثور على منشورات مطابقة</h3>
             <p className="text-xs text-slate-500 max-w-sm mx-auto mb-4">
-              جرب تغيير معايير البحث أو اختيار فلتر "الكل" لعرض جميع منشورات فيسبوك.
+              لا توجد منشورات منشورة حالياً أو لا تطابق معايير البحث.
             </p>
             <button
               onClick={() => {
