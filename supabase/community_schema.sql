@@ -112,6 +112,11 @@ CREATE TABLE IF NOT EXISTS public.reports (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- One post report per authenticated user. NULL reporter IDs are excluded so bot/admin imports remain possible.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_post_reporter_unique
+  ON public.reports (post_id, reporter_user_id)
+  WHERE target_type = 'post' AND post_id IS NOT NULL AND reporter_user_id IS NOT NULL;
+
 -- 6. MEDIA OBJECTS (Cloudflare R2 Storage Metadata)
 CREATE TABLE IF NOT EXISTS public.media (
   id TEXT PRIMARY KEY,

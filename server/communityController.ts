@@ -53,6 +53,7 @@ export async function getPublishedPosts(req: Request, res: Response) {
           likes_count,
           comments_count,
           reactions_count,
+          reports_count,
           group_id,
           group_name,
           group_url,
@@ -71,6 +72,7 @@ export async function getPublishedPosts(req: Request, res: Response) {
           )
         `)
         .eq('status', 'published')
+        .order('reports_count', { ascending: true, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(limitNum);
 
@@ -520,29 +522,123 @@ export async function reportPost(req: AuthenticatedRequest, res: Response) {
     }
 
     if (db) {
-      const { error } = await db.from('reports').insert(reportRecord);
-      if (error && isProd) {
+      // One report per user for this post. The database unique index is the final safeguard;
+      // this pre-check gives the user a friendly response without creating a duplicate row.
+      const { data: existingReport, error: duplicateCheckError } = await db
+        .from('reports')
+        .select('id')
+        .eq('post_id', id)
+        .eq('target_type', 'post')
+        .eq('reporter_user_id', user.id)
+        .maybeSingle();
+
+      if (duplicateCheckError) {
+        console.error('[Community Reports] Duplicate check failed:', duplicateCheckError.message);
         return res.status(503).json({
           success: false,
-          error: `تعذر تسجيل البلاغ في قاعدة البيانات: ${error.message}`,
-          code: 'DATABASE_UNAVAILABLE'
+          error: 'تعذر التحقق من البلاغ السابق حالياً',
+          code: 'DATABASE_UNAVAILABLE',
         });
       }
-      
-      // Increment report count on post
-      try {
-        const { data: p } = await db.from('posts').select('reports_count').eq('id', id).single();
-        if (p) {
-          await db.from('posts').update({ reports_count: (p.reports_count || 0) + 1 }).eq('id', id);
+
+      if (existingReport) {
+        return res.status(409).json({
+          success: false,
+          error: 'لقد أرسلت بلاغاً عن هذا المنشور مسبقاً',
+          code: 'REPORT_ALREADY_EXISTS',
+        });
+      }
+
+      const { error: insertError } = await db.from('reports').insert(reportRecord);
+      if (insertError) {
+        // PostgreSQL unique violation also protects against two simultaneous requests.
+        if (insertError.code === '23505') {
+          return res.status(409).json({
+            success: false,
+            error: 'لقد أرسلت بلاغاً عن هذا المنشور مسبقاً',
+            code: 'REPORT_ALREADY_EXISTS',
+          });
         }
-      } catch (_) {}
+        console.error('[Community Reports] Insert failed:', insertError.message);
+        return res.status(503).json({
+          success: false,
+          error: 'تعذر تسجيل البلاغ في قاعدة البيانات حالياً',
+          code: 'DATABASE_UNAVAILABLE',
+        });
+      }
+
+      const { count: reportCount, error: countError } = await db
+        .from('reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('post_id', id)
+        .eq('target_type', 'post')
+        .neq('status', 'dismissed');
+
+      if (countError) {
+        console.error('[Community Reports] Count failed:', countError.message);
+      }
+
+      const totalReports = reportCount ?? 1;
+      const now = new Date().toISOString();
+      const postUpdate = totalReports >= 2
+        ? {
+            reports_count: totalReports,
+            status: 'deleted',
+            moderated_at: now,
+            moderated_by: 'automatic_report_threshold',
+            updated_at: now,
+          }
+        : {
+            reports_count: totalReports,
+            updated_at: now,
+          };
+
+      const { error: postUpdateError } = await db
+        .from('posts')
+        .update(postUpdate)
+        .eq('id', id);
+
+      if (postUpdateError) {
+        console.error('[Community Reports] Post update failed:', postUpdateError.message);
+        return res.status(503).json({
+          success: false,
+          error: 'تم تسجيل البلاغ، لكن تعذر تحديث حالة المنشور حالياً',
+          code: 'DATABASE_UNAVAILABLE',
+        });
+      }
+
+      return res.json({
+        success: true,
+        action: totalReports >= 2 ? 'deleted' : 'queued',
+        reports_count: totalReports,
+        message: totalReports >= 2
+          ? 'تم حذف المنشور تلقائياً بعد وصول بلاغين من مستخدمين مختلفين.'
+          : 'شكراً لك. تم استلام بلاغك وسيظهر المنشور في نهاية القائمة مؤقتاً.',
+      });
     }
 
+    // Development-only in-memory fallback.
+    const duplicateInMemory = inMemoryReportsCache.some(
+      (report) => report.post_id === id && report.reporter_user_id === user.id && report.target_type === 'post'
+    );
+    if (duplicateInMemory) {
+      return res.status(409).json({
+        success: false,
+        error: 'لقد أرسلت بلاغاً عن هذا المنشور مسبقاً',
+        code: 'REPORT_ALREADY_EXISTS',
+      });
+    }
     inMemoryReportsCache.push(reportRecord);
-
+    const inMemoryCount = inMemoryReportsCache.filter(
+      (report) => report.post_id === id && report.target_type === 'post' && report.status !== 'dismissed'
+    ).length;
     res.json({
       success: true,
-      message: 'شكراً لك. تم استلام بلاغك وسيقوم فريق الإشراف بمراجعته فوراً.',
+      action: inMemoryCount >= 2 ? 'deleted' : 'queued',
+      reports_count: inMemoryCount,
+      message: inMemoryCount >= 2
+        ? 'تم حذف المنشور تلقائياً بعد وصول بلاغين من مستخدمين مختلفين.'
+        : 'شكراً لك. تم استلام بلاغك وسيظهر المنشور في نهاية القائمة مؤقتاً.',
     });
   } catch (err: any) {
     res.status(500).json({ error: `فشل تسجيل البلاغ: ${err.message}` });
