@@ -455,7 +455,9 @@ export async function importCommunityJson(req: AuthenticatedRequest, res: Respon
       }));
 
       const postType = item.post_type || item.type || 'curriculum';
-      const postStatus = item.status || (autoPublish ? 'published' : 'pending');
+      // An explicit admin auto-publish choice must override an incoming pending status.
+      // Imported content is otherwise kept pending for manual moderation.
+      const postStatus = autoPublish ? 'published' : (item.status || 'pending');
       const sourceType = 'manual_json_import';
 
       const postRow = {
