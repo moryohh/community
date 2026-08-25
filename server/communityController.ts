@@ -103,10 +103,11 @@ export async function getPublishedPosts(req: Request, res: Response) {
         });
       }
 
-      if (error && isProd) {
+      if (error) {
+        console.error('[Community API] Failed to query published posts:', error.message);
         return res.status(503).json({
           success: false,
-          error: `تعذر جلب المنشورات من قاعدة البيانات: ${error.message}`,
+          error: 'تعذر جلب المنشورات من قاعدة البيانات حالياً',
           code: 'DATABASE_UNAVAILABLE'
         });
       }
