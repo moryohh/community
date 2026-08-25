@@ -19,7 +19,10 @@ export async function getPublishedPosts(req: Request, res: Response) {
       group_id,
     } = req.query;
 
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit as string, 10) || 20));
+    const loadAll = String(req.query.all || '').toLowerCase() === 'true';
+    const requestedLimit = parseInt(limit as string, 10) || 20;
+    // The UI can request the complete published feed once; keep a hard cap to avoid unbounded responses.
+    const limitNum = loadAll ? 1000 : Math.min(50, Math.max(1, requestedLimit));
     const db = getCommunityDbClient();
     const isProd = process.env.NODE_ENV === 'production';
 
@@ -71,7 +74,7 @@ export async function getPublishedPosts(req: Request, res: Response) {
         .order('created_at', { ascending: false })
         .limit(limitNum);
 
-      if (cursor && typeof cursor === 'string') {
+      if (!loadAll && cursor && typeof cursor === 'string') {
         query = query.lt('created_at', cursor);
       }
 
@@ -90,7 +93,7 @@ export async function getPublishedPosts(req: Request, res: Response) {
       const { data, error } = await query;
 
       if (!error && data) {
-        const nextCursor = data.length === limitNum ? data[data.length - 1].created_at : null;
+        const nextCursor = !loadAll && data.length === limitNum ? data[data.length - 1].created_at : null;
         return res.json({
           success: true,
           posts: data,

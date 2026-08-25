@@ -96,28 +96,23 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
 }) => {
   // Live state loaded from Supabase B through the public Community API.
   const [posts, setPosts] = useState<FacebookPost[]>([]);
+  const [visiblePostCount, setVisiblePostCount] = useState(10);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [hasMore, setHasMore] = useState(true);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'with_images' | 'with_comments' | 'text_only'>('all');
+  const [selectedGroup, setSelectedGroup] = useState<string>('all');
+  const [likedPosts, setLikedPosts] = useState<Record<string, boolean>>({});
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  const [newComments, setNewComments] = useState<Record<string, string>>({});
+  const [syncedPostIds, setSyncedPostIds] = useState<Record<string, boolean>>({});
 
-  const loadCommunityPosts = useCallback(async (reset = false) => {
-    if (!reset && (!hasMore || isLoadingMore || isLoadingPosts)) return;
-
-    if (reset) {
-      setIsLoadingPosts(true);
-      setNextCursor(null);
-      setHasMore(true);
-    } else {
-      setIsLoadingMore(true);
-    }
+  const loadCommunityPosts = useCallback(async () => {
+    setIsLoadingPosts(true);
     setLoadError(null);
-
     try {
-      const cursorParam = !reset && nextCursor ? `&cursor=${encodeURIComponent(nextCursor)}` : '';
-      const response = await fetch(`/api/v1/community/posts?limit=10${cursorParam}`, { cache: 'no-store' });
+      const response = await fetch('/api/v1/community/posts?all=true', { cache: 'no-store' });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) {
         throw new Error(payload?.error || 'تعذر جلب منشورات المجتمع من قاعدة B');
@@ -129,52 +124,57 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
           const dateDifference = parsePostDate(b) - parsePostDate(a);
           return dateDifference || String(b.id).localeCompare(String(a.id));
         });
-
-      setPosts(previousPosts => {
-        if (reset) return livePosts;
-        const merged = new Map<string, FacebookPost>(previousPosts.map(post => [post.id, post] as const));
-        livePosts.forEach(post => merged.set(post.id, post));
-        return Array.from(merged.values()).sort((a, b) => {
-          const dateDifference = parsePostDate(b) - parsePostDate(a);
-          return dateDifference || String(b.id).localeCompare(String(a.id));
-        });
-      });
-      setNextCursor(payload.nextCursor || null);
-      setHasMore(Boolean(payload.hasMore && payload.nextCursor));
+      setPosts(livePosts);
+      setVisiblePostCount(10);
     } catch (error: any) {
-      if (reset) setPosts([]);
+      setPosts([]);
       setLoadError(error?.message || 'تعذر جلب منشورات المجتمع من قاعدة B');
     } finally {
-      if (reset) setIsLoadingPosts(false);
-      setIsLoadingMore(false);
+      setIsLoadingPosts(false);
     }
-  }, [hasMore, isLoadingMore, isLoadingPosts, nextCursor]);
-
-  useEffect(() => {
-    void loadCommunityPosts(true);
   }, []);
 
   useEffect(() => {
+    void loadCommunityPosts();
+  }, [loadCommunityPosts]);
+
+  const filteredPosts = useMemo(() => {
+    return posts.filter(post => {
+      if (selectedGroup !== 'all' && post.group_name !== selectedGroup) return false;
+      if (activeFilter === 'with_images' && (!post.media_urls || post.media_urls.length === 0)) return false;
+      if (activeFilter === 'with_comments' && (!post.comments || post.comments.length === 0)) return false;
+      if (activeFilter === 'text_only' && post.media_urls && post.media_urls.length > 0) return false;
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const textMatch = post.post_text?.toLowerCase().includes(q);
+        const authorMatch = post.author_name?.toLowerCase().includes(q);
+        const commentsMatch = post.comments?.some(c => c.comment_text.toLowerCase().includes(q));
+        if (!textMatch && !authorMatch && !commentsMatch) return false;
+      }
+      return true;
+    });
+  }, [posts, activeFilter, selectedGroup, searchQuery]);
+
+  const visiblePosts = useMemo(
+    () => filteredPosts.slice(0, visiblePostCount),
+    [filteredPosts, visiblePostCount]
+  );
+
+  useEffect(() => {
     const sentinel = loadMoreRef.current;
-    if (!sentinel || !hasMore || isLoadingPosts || isLoadingMore) return;
+    if (!sentinel || isLoadingPosts || visiblePostCount >= filteredPosts.length) return;
 
     const observer = new IntersectionObserver(
       entries => {
-        if (entries[0]?.isIntersecting) void loadCommunityPosts(false);
+        if (entries[0]?.isIntersecting) {
+          setVisiblePostCount(current => Math.min(current + 10, filteredPosts.length));
+        }
       },
       { rootMargin: '600px 0px' }
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [hasMore, isLoadingPosts, isLoadingMore, loadCommunityPosts]);
-
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState<'all' | 'with_images' | 'with_comments' | 'text_only'>('all');
-  const [selectedGroup, setSelectedGroup] = useState<string>('all');
-  const [likedPosts, setLikedPosts] = useState<Record<string, boolean>>({});
-  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
-  const [newComments, setNewComments] = useState<Record<string, string>>({});
-  const [syncedPostIds, setSyncedPostIds] = useState<Record<string, boolean>>({});
+  }, [filteredPosts.length, isLoadingPosts, visiblePostCount]);
 
   // Lightbox Modal state
   const [lightboxState, setLightboxState] = useState<{
@@ -192,35 +192,6 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [customJsonInput, setCustomJsonInput] = useState('');
   const [uploadError, setUploadError] = useState<string | null>(null);
-
-  // Filtered posts
-  const filteredPosts = useMemo(() => {
-    return posts.filter(post => {
-      // Group filter
-      if (selectedGroup !== 'all' && post.group_name !== selectedGroup) {
-        return false;
-      }
-      // Content filter
-      if (activeFilter === 'with_images' && (!post.media_urls || post.media_urls.length === 0)) {
-        return false;
-      }
-      if (activeFilter === 'with_comments' && (!post.comments || post.comments.length === 0)) {
-        return false;
-      }
-      if (activeFilter === 'text_only' && post.media_urls && post.media_urls.length > 0) {
-        return false;
-      }
-      // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const textMatch = post.post_text?.toLowerCase().includes(q);
-        const authorMatch = post.author_name?.toLowerCase().includes(q);
-        const commentsMatch = post.comments?.some(c => c.comment_text.toLowerCase().includes(q));
-        if (!textMatch && !authorMatch && !commentsMatch) return false;
-      }
-      return true;
-    });
-  }, [posts, activeFilter, selectedGroup, searchQuery]);
 
   // Total stats
   const totalImagesCount = useMemo(() => {
@@ -334,7 +305,7 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
   };
 
   const handleResetToDefault = () => {
-    void loadCommunityPosts(true);
+    void loadCommunityPosts();
   };
 
   return (
@@ -521,7 +492,7 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
             </button>
           </div>
         ) : (
-          filteredPosts.map((post, postIdx) => {
+          visiblePosts.map((post, postIdx) => {
             const isLiked = likedPosts[post.id];
             const areCommentsOpen = expandedComments[post.id];
             const isSynced = syncedPostIds[post.id] || post.isSyncedToBase1;
@@ -869,13 +840,10 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
       </div>
 
       <div ref={loadMoreRef} className="min-h-12 flex items-center justify-center py-4" aria-live="polite">
-        {isLoadingMore && (
-          <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
-            <RefreshCw className="w-4 h-4 text-[#1877F2] animate-spin" />
-            <span>جاري تحميل منشورات أقدم...</span>
-          </div>
+        {!isLoadingPosts && visiblePostCount < filteredPosts.length && (
+          <span className="text-xs text-slate-400">مرّر لرؤية منشورات أقدم</span>
         )}
-        {!isLoadingMore && !isLoadingPosts && !hasMore && posts.length > 0 && (
+        {!isLoadingPosts && visiblePostCount >= filteredPosts.length && posts.length > 0 && (
           <span className="text-xs text-slate-400">تم عرض جميع المنشورات المتاحة</span>
         )}
       </div>
