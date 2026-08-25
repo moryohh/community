@@ -379,8 +379,8 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
             <span className="text-lg font-bold text-emerald-300">{totalCommentsCount} تعليق</span>
           </div>
           <div className="bg-white/10 rounded-xl p-2.5 backdrop-blur-xs">
-            <span className="text-blue-200 block text-[11px]">المجموعة المستهدفة</span>
-            <span className="text-xs font-bold truncate block">السادس العلمي 26🤍27</span>
+            <span className="text-blue-200 block text-[11px]">ترتيب المنشورات</span>
+            <span className="text-xs font-bold truncate block">الأحدث إلى الأقدم</span>
           </div>
         </div>
       </div>
@@ -525,11 +525,7 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
                         <span className="text-sm font-bold text-slate-900 hover:underline cursor-pointer">
                           {post.author_name || 'مستخدم فيسبوك'}
                         </span>
-                        {post.group_name && (
-                          <span className="text-xs text-slate-500 font-medium">
-                            في <span className="font-bold text-slate-700">{post.group_name}</span>
-                          </span>
-                        )}
+
                       </div>
 
                       <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
