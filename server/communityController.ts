@@ -94,6 +94,11 @@ export async function getPublishedPosts(req: Request, res: Response) {
       const { data, error } = await query;
 
       if (!error && data) {
+        const statusCounts = data.reduce((counts: Record<string, number>, post: any) => {
+          const status = String(post.status || '(empty)').trim().toLowerCase();
+          counts[status] = (counts[status] || 0) + 1;
+          return counts;
+        }, {});
         const publishedPosts = data.filter((post: any) =>
           String(post.status || '').trim().toLowerCase() === 'published'
         );
@@ -106,6 +111,10 @@ export async function getPublishedPosts(req: Request, res: Response) {
           count: publishedPosts.length,
           nextCursor,
           hasMore: Boolean(nextCursor),
+          diagnostics: {
+            totalRowsRead: data.length,
+            statusCounts,
+          },
         });
       }
 
