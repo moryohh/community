@@ -70,8 +70,7 @@ export async function getPublishedPosts(req: Request, res: Response) {
             created_at
           )
         `)
-        // Read rows first, then normalize status before the public filter.
-        // This handles legacy imports containing casing or surrounding whitespace.
+        .eq('status', 'published')
         .order('created_at', { ascending: false })
         .limit(limitNum);
 
@@ -94,27 +93,13 @@ export async function getPublishedPosts(req: Request, res: Response) {
       const { data, error } = await query;
 
       if (!error && data) {
-        const statusCounts = data.reduce((counts: Record<string, number>, post: any) => {
-          const status = String(post.status || '(empty)').trim().toLowerCase();
-          counts[status] = (counts[status] || 0) + 1;
-          return counts;
-        }, {});
-        const publishedPosts = data.filter((post: any) =>
-          String(post.status || '').trim().toLowerCase() === 'published'
-        );
-        const nextCursor = !loadAll && publishedPosts.length === limitNum
-          ? publishedPosts[publishedPosts.length - 1].created_at
-          : null;
+        const nextCursor = !loadAll && data.length === limitNum ? data[data.length - 1].created_at : null;
         return res.json({
           success: true,
-          posts: publishedPosts,
-          count: publishedPosts.length,
+          posts: data,
+          count: data.length,
           nextCursor,
           hasMore: Boolean(nextCursor),
-          diagnostics: {
-            totalRowsRead: data.length,
-            statusCounts,
-          },
         });
       }
 
