@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import {
   ThumbsUp,
   MessageCircle,
@@ -97,35 +97,76 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
   // Live state loaded from Supabase B through the public Community API.
   const [posts, setPosts] = useState<FacebookPost[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(true);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
 
-  const loadCommunityPosts = async () => {
-    setIsLoadingPosts(true);
+  const loadCommunityPosts = useCallback(async (reset = false) => {
+    if (!reset && (!hasMore || isLoadingMore || isLoadingPosts)) return;
+
+    if (reset) {
+      setIsLoadingPosts(true);
+      setNextCursor(null);
+      setHasMore(true);
+    } else {
+      setIsLoadingMore(true);
+    }
     setLoadError(null);
+
     try {
-      const response = await fetch('/api/v1/community/posts?limit=50', { cache: 'no-store' });
+      const cursorParam = !reset && nextCursor ? `&cursor=${encodeURIComponent(nextCursor)}` : '';
+      const response = await fetch(`/api/v1/community/posts?limit=10${cursorParam}`, { cache: 'no-store' });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.success) {
         throw new Error(payload?.error || 'تعذر جلب منشورات المجتمع من قاعدة B');
       }
+
       const livePosts = (Array.isArray(payload.posts) ? payload.posts : [])
         .map(mapCommunityApiPost)
         .sort((a: FacebookPost, b: FacebookPost) => {
           const dateDifference = parsePostDate(b) - parsePostDate(a);
           return dateDifference || String(b.id).localeCompare(String(a.id));
         });
-      setPosts(livePosts);
+
+      setPosts(previousPosts => {
+        if (reset) return livePosts;
+        const merged = new Map<string, FacebookPost>(previousPosts.map(post => [post.id, post] as const));
+        livePosts.forEach(post => merged.set(post.id, post));
+        return Array.from(merged.values()).sort((a, b) => {
+          const dateDifference = parsePostDate(b) - parsePostDate(a);
+          return dateDifference || String(b.id).localeCompare(String(a.id));
+        });
+      });
+      setNextCursor(payload.nextCursor || null);
+      setHasMore(Boolean(payload.hasMore && payload.nextCursor));
     } catch (error: any) {
-      setPosts([]);
+      if (reset) setPosts([]);
       setLoadError(error?.message || 'تعذر جلب منشورات المجتمع من قاعدة B');
     } finally {
-      setIsLoadingPosts(false);
+      if (reset) setIsLoadingPosts(false);
+      setIsLoadingMore(false);
     }
-  };
+  }, [hasMore, isLoadingMore, isLoadingPosts, nextCursor]);
 
   useEffect(() => {
-    void loadCommunityPosts();
+    void loadCommunityPosts(true);
   }, []);
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current;
+    if (!sentinel || !hasMore || isLoadingPosts || isLoadingMore) return;
+
+    const observer = new IntersectionObserver(
+      entries => {
+        if (entries[0]?.isIntersecting) void loadCommunityPosts(false);
+      },
+      { rootMargin: '600px 0px' }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingPosts, isLoadingMore, loadCommunityPosts]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<'all' | 'with_images' | 'with_comments' | 'text_only'>('all');
@@ -293,7 +334,7 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
   };
 
   const handleResetToDefault = () => {
-    void loadCommunityPosts();
+    void loadCommunityPosts(true);
   };
 
   return (
@@ -824,6 +865,18 @@ export const FacebookWatchFeed: React.FC<FacebookWatchFeedProps> = ({
               </div>
             );
           })
+        )}
+      </div>
+
+      <div ref={loadMoreRef} className="min-h-12 flex items-center justify-center py-4" aria-live="polite">
+        {isLoadingMore && (
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+            <RefreshCw className="w-4 h-4 text-[#1877F2] animate-spin" />
+            <span>جاري تحميل منشورات أقدم...</span>
+          </div>
+        )}
+        {!isLoadingMore && !isLoadingPosts && !hasMore && posts.length > 0 && (
+          <span className="text-xs text-slate-400">تم عرض جميع المنشورات المتاحة</span>
         )}
       </div>
 
