@@ -32,6 +32,7 @@ import { BaseErrorsModal } from './components/BaseErrorsModal';
 import { PersonalPortal } from './components/PersonalPortal';
 import { CommunityHub } from './components/CommunityHub';
 import { CourseRemindersDashboard } from './components/CourseRemindersDashboard';
+import { AdminLoginPage } from './components/AdminLoginPage';
 import {
   OcrProject,
   SystemSettings,
@@ -51,7 +52,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
 
 export function App() {
   // Navigation view: 'portal' (الصفحة الشخصية) | 'ocr' (أداة OCR) | 'community' (المجتمع)
-  const [currentView, setCurrentView] = useState<'portal' | 'ocr' | 'community' | 'course_reminders'>('portal');
+  const [currentView, setCurrentView] = useState<'portal' | 'ocr' | 'community' | 'admin_login' | 'course_reminders'>('portal');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'api_gateway' | 'sandbox'>('dashboard');
   const [projects, setProjects] = useState<OcrProject[]>([]);
   const [incomingTasks, setIncomingTasks] = useState<OcrComparisonResult[]>([]);
@@ -465,7 +466,15 @@ export function App() {
         />
       )}
 
-      {/* VIEW 3: Course reminder management (separate from OCR and Community) */}
+      {/* VIEW 3: Independent admin login page before course management */}
+      {currentView === 'admin_login' && (
+        <AdminLoginPage
+          onAuthenticated={() => setCurrentView('course_reminders')}
+          onBackToPortal={() => setCurrentView('portal')}
+        />
+      )}
+
+      {/* VIEW 4: Course reminder management (separate from OCR and Community) */}
       {currentView === 'course_reminders' && (
         <CourseRemindersDashboard
           onBackToPortal={() => setCurrentView('portal')}
@@ -473,7 +482,7 @@ export function App() {
         />
       )}
 
-      {/* VIEW 4: Full OCR Management & Routing Tool */}
+      {/* VIEW 5: Full OCR Management & Routing Tool */}
       {currentView === 'ocr' && (
         <div className="flex flex-col min-h-screen">
           {/* Header with Navigation Tabs */}

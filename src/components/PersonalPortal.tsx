@@ -24,7 +24,7 @@ import {
 import { OcrProject, SupabaseConnectionStatus, SystemKeysStatus } from '../types';
 
 interface PersonalPortalProps {
-  onNavigate: (view: 'ocr' | 'community' | 'course_reminders') => void;
+  onNavigate: (view: 'ocr' | 'community' | 'admin_login') => void;
   projects: OcrProject[];
   connectionStatus: SupabaseConnectionStatus | null;
   keysStatus: SystemKeysStatus;
@@ -236,7 +236,7 @@ export const PersonalPortal: React.FC<PersonalPortalProps> = ({
             {/* CARD 3: COURSE REMINDERS */}
             <div
               id="card-course-reminders"
-              onClick={() => onNavigate('course_reminders')}
+              onClick={() => onNavigate('admin_login')}
               className="group relative overflow-hidden rounded-3xl border-2 border-emerald-200 bg-white p-7 flex flex-col justify-between cursor-pointer transition-all duration-300 hover:border-emerald-500 hover:shadow-2xl hover:shadow-emerald-500/10"
             >
               <div className="absolute left-0 right-0 top-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 transition-all group-hover:h-2.5" />
