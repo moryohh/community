@@ -14,20 +14,24 @@ export interface DeepSeekAnalysisResult {
 export async function compareWithDeepSeek(
   questionText: string,
   extractedAnswer: string,
-  apiKey: string = process.env.DEEPSEEK_API_KEY || ''
+  apiKey: string = process.env.DEEPSEEK_API_KEY || '',
+  modelAnswer: string = ''
 ): Promise<DeepSeekAnalysisResult | null> {
   const effectiveKey = apiKey.trim() || process.env.DEEPSEEK_API_KEY || '';
   if (!effectiveKey) {
     return null;
   }
 
-  const prompt = `أنت خبير في تدقيق ومطابقة إجابات الأسئلة مع النصوص المستخرجة من الصور (OCR).
-قم بمقارنة السؤال التالي مع النص المستخرج من الصورة (الذي يمثل الجواب)، وقيم مدى التطابق وصحة الإجابة:
+  const prompt = `أنت خبير في تصحيح إجابات الطلاب ومقارنتها بالإجابة النموذجية.
+استخدم السؤال لفهم المطلوب، ثم قارن إجابة الطالب المستخرجة من الصورة مع الإجابة النموذجية. لا تعتبر تشابه كلمات السؤال مع الجواب دليلًا على صحة الإجابة.
 
 [السؤال]:
 ${questionText}
 
-[النص المستخرج من الصورة (الجواب)]:
+[الإجابة النموذجية]:
+${modelAnswer || 'غير متوفرة؛ قيّم الإجابة بناءً على السؤال والمعرفة العلمية الظاهرة.'}
+
+[إجابة الطالب المستخرجة من الصورة]:
 ${extractedAnswer}
 
 أعد الإجابة بصيغة JSON فقط بهذا الشكل المحدد بدقة دون أي علامات markdown إضافية:
@@ -50,7 +54,7 @@ ${extractedAnswer}
     response_format: { type: 'json_object' }
   });
 
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const options: https.RequestOptions = {
       hostname: 'api.deepseek.com',
       port: 443,
@@ -75,7 +79,7 @@ ${extractedAnswer}
           const json = JSON.parse(data);
           const content = json.choices?.[0]?.message?.content;
           if (!content) {
-            resolve(null);
+            reject(new Error(`لم تُرجع DeepSeek نتيجة قابلة للقراءة (HTTP ${res.statusCode})`));
             return;
           }
 
@@ -89,21 +93,23 @@ ${extractedAnswer}
             missingKeywords: Array.isArray(parsed.missingKeywords) ? parsed.missingKeywords : [],
             explanation: parsed.explanation || '',
           });
-        } catch (e) {
-          console.warn('DeepSeek parse error:', e);
-          resolve(null);
+        } catch (e: any) {
+          const message = e instanceof SyntaxError
+            ? 'تعذر تحليل استجابة DeepSeek بصيغة JSON'
+            : (e?.message || 'تعذر قراءة استجابة DeepSeek');
+          console.warn('DeepSeek parse error:', message);
+          reject(new Error(message));
         }
       });
     });
 
     req.on('error', (err) => {
       console.warn('DeepSeek network error:', err.message);
-      resolve(null);
+      reject(new Error(`تعذر الاتصال بـ DeepSeek: ${err.message}`));
     });
 
     req.on('timeout', () => {
-      req.destroy();
-      resolve(null);
+      req.destroy(new Error('انتهت مهلة استجابة DeepSeek (15 ثانية)'));
     });
 
     req.write(payload);

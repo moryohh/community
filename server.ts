@@ -118,6 +118,12 @@ interface OcrComparisonHistoryItem {
   createdAt: string;
   status: 'completed' | 'failed';
   errorMessage?: string;
+  failureStage?: 'validation' | 'ocr' | 'deepseek' | 'comparison';
+  deepseekStatus?: 'not_configured' | 'success' | 'failed' | 'local_fallback';
+  requestId?: string;
+  score?: number;
+  maxScore?: number;
+  percentage?: number;
   attemptedBases?: Array<{
     projectId: string;
     projectName: string;
@@ -462,8 +468,17 @@ async function startServer() {
       questionText,
       question_text,
       question,
+      modelAnswer,
+      model_answer,
+      prompt,
       fileName,
       fileSize,
+      maxScore,
+      max_score,
+      request_id,
+      requestId,
+      subject,
+      lesson,
       target_project_id,
       projectId,
       language = "ara",
@@ -471,12 +486,16 @@ async function startServer() {
     } = req.body;
 
     const actualImage = imageBase64 || image_base64;
-    const actualQuestion = (questionText || question_text || question || "").trim();
+    const actualQuestion = (questionText || question_text || question || prompt || "").trim();
+    const actualModelAnswer = (modelAnswer || model_answer || "").trim();
+    const actualRequestId = String(request_id || requestId || `eval_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`);
     const requestedProjId = target_project_id || projectId;
+    const requestedMaxScore = Math.max(1, Number(maxScore || max_score) || 10);
 
     if (!actualImage) {
       return res.status(400).json({
         success: false,
+        request_id: actualRequestId,
         error: "Missing required parameter: imageBase64 (الصورة مطلوبة لمعالجة OCR)",
       });
     }
@@ -484,6 +503,7 @@ async function startServer() {
     if (!actualQuestion) {
       return res.status(400).json({
         success: false,
+        request_id: actualRequestId,
         error: "Missing required parameter: questionText (نص السؤال مطلوب لمقارنة الجواب)",
       });
     }
@@ -491,16 +511,48 @@ async function startServer() {
     const uniqueImageId = `img_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
     const startTime = Date.now();
 
-    // 1. Get active queue ordered by priority (Head of queue = #1)
+    // 1. Use the three configured OCR bases only, starting each request at the next base.
+    const maxConfiguredBases = Math.max(1, Number(process.env.OCR_BASE_COUNT) || 3);
     let candidateQueue = inMemoryProjects
       .filter((p) => p.status === "active")
-      .sort((a, b) => (a.priority_order || 999) - (b.priority_order || 999));
+      .sort((a, b) => (a.priority_order || 999) - (b.priority_order || 999))
+      .slice(0, maxConfiguredBases);
+
+    if (!requestedProjId && candidateQueue.length > 1) {
+      const startIndex = roundRobinIndex % candidateQueue.length;
+      roundRobinIndex = (roundRobinIndex + 1) % candidateQueue.length;
+      candidateQueue = candidateQueue.slice(startIndex).concat(candidateQueue.slice(0, startIndex));
+    }
 
     if (candidateQueue.length === 0) {
       return res.status(503).json({
         success: false,
+        request_id: actualRequestId,
+        failure_stage: 'ocr',
         error: "لا توجد أي قواعد OCR نشطة حالياً لمعالجة الطلب.",
       });
+    }
+
+    // Hydrate per-base secrets from Supabase B on demand so external requests
+    // work even when the admin dashboard has not been opened after a restart.
+    const { client: queueClient } = getSupabaseClient();
+    if (queueClient) {
+      try {
+        const { data: queueRows } = await queueClient
+          .from('ocr_projects')
+          .select('id, ocr_api_key, service_role_key')
+          .in('id', candidateQueue.map((project) => project.id));
+        (queueRows || []).forEach((row) => {
+          if (row.ocr_api_key || row.service_role_key) {
+            setProjectSecrets(row.id, {
+              ocr_api_key: row.ocr_api_key || undefined,
+              service_role_key: row.service_role_key || undefined,
+            });
+          }
+        });
+      } catch (error: any) {
+        console.warn('[OCR Queue] Could not hydrate per-base secrets:', error?.message || error);
+      }
     }
 
     if (requestedProjId) {
@@ -632,6 +684,11 @@ async function startServer() {
         createdAt: new Date().toISOString(),
         status: "failed",
         errorMessage: finalErrorMsg,
+        failureStage: 'ocr',
+        deepseekStatus: 'not_configured',
+        requestId: actualRequestId,
+        maxScore: requestedMaxScore,
+        percentage: 0,
         attemptedBases: attemptedBases,
         failoverOccurred: failoverOccurred,
         failoverNote: `فشلت محاولة المعالجة في جميع القواعد في الطابور: ${attemptedBases.map((a) => `${a.projectName} (${a.error})`).join(' | ')}`,
@@ -654,14 +711,20 @@ async function startServer() {
     try {
       const extractedAnswer = ocrResult.text || "";
 
-      // 4. Semantic Comparison using the SINGLE SHARED DeepSeek API Key
-      let comparison = compareQuestionWithAnswer(actualQuestion, extractedAnswer);
+      // 4. Compare the student's extracted answer against the model answer.
+      // If no model answer is supplied, retain the legacy question-context comparison.
+      const comparisonReference = actualModelAnswer || actualQuestion;
+      let comparison = compareQuestionWithAnswer(comparisonReference, extractedAnswer);
       let deepseekExplanation = "";
+      let deepseekStatus: 'not_configured' | 'success' | 'failed' | 'local_fallback' = runtimeDeepseekApiKey.trim()
+        ? 'failed'
+        : 'not_configured';
       let engineLabel = `${ocrResult.engineUsed} (القاعدة: ${effectiveProject.name})`;
 
       if (runtimeDeepseekApiKey.trim() && extractedAnswer) {
         try {
-          const dsResult = await compareWithDeepSeek(actualQuestion, extractedAnswer, runtimeDeepseekApiKey);
+          const dsResult = await compareWithDeepSeek(actualQuestion, extractedAnswer, runtimeDeepseekApiKey, actualModelAnswer);
+          deepseekStatus = 'success';
           if (dsResult) {
             comparison = {
               ...comparison,
@@ -674,11 +737,18 @@ async function startServer() {
             deepseekExplanation = dsResult.explanation || "";
             engineLabel += " + DeepSeek Shared Semantic Analysis";
           }
-        } catch (e) {
-          console.warn("DeepSeek comparison fallback to local tokenizer:", e);
+        } catch (e: any) {
+          deepseekStatus = 'local_fallback';
+          console.warn("DeepSeek comparison fallback to local tokenizer:", e?.message || e);
         }
+      } else if (!runtimeDeepseekApiKey.trim()) {
+        deepseekStatus = 'not_configured';
+      } else if (!extractedAnswer) {
+        deepseekStatus = 'local_fallback';
       }
 
+      const percentage = Math.min(100, Math.max(0, Math.round(comparison.similarityScore)));
+      const score = Math.round((requestedMaxScore * percentage) / 100);
       const totalDuration = Date.now() - startTime;
 
       // 5. Save result in live history
@@ -700,6 +770,12 @@ async function startServer() {
         source: source === "testing_sandbox" ? "testing_sandbox" : "external_api",
         createdAt: new Date().toISOString(),
         status: "completed",
+        failureStage: undefined,
+        deepseekStatus,
+        requestId: actualRequestId,
+        score,
+        maxScore: requestedMaxScore,
+        percentage,
         attemptedBases: attemptedBases,
         failoverOccurred: failoverOccurred,
         failoverNote: failoverNote,
@@ -711,13 +787,19 @@ async function startServer() {
       return res.json({
         success: true,
         image_id: uniqueImageId,
+        request_id: actualRequestId,
         question: actualQuestion,
         extracted_answer: extractedAnswer,
+        score,
+        max_score: requestedMaxScore,
+        percentage,
         similarity_score: comparison.similarityScore,
         match_verdict: comparison.matchVerdict,
         matched_keywords: comparison.matchedKeywords,
         missing_keywords: comparison.missingKeywords,
         explanation: deepseekExplanation,
+        deepseek_status: deepseekStatus,
+        comparison_engine: deepseekStatus === 'success' ? 'deepseek' : 'local_fallback',
         processing_time_ms: totalDuration,
         dispatched_to_project: {
           id: effectiveProject.id,

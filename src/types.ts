@@ -93,6 +93,12 @@ export interface OcrComparisonResult {
   createdAt: string;
   status: 'completed' | 'failed';
   errorMessage?: string;
+  failureStage?: 'validation' | 'ocr' | 'deepseek' | 'comparison';
+  deepseekStatus?: 'not_configured' | 'success' | 'failed' | 'local_fallback';
+  requestId?: string;
+  score?: number;
+  maxScore?: number;
+  percentage?: number;
   attemptedBases?: BaseAttemptLog[];
   failoverOccurred?: boolean;
   failoverNote?: string;

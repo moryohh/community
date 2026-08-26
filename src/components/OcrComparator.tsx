@@ -699,13 +699,19 @@ export const OcrComparator: React.FC<OcrComparatorProps> = ({
                         {item.status === 'failed' && (
                           <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-rose-100 text-rose-800 text-[10px] font-bold rounded border border-rose-200 shrink-0">
                             <XCircle className="w-2.5 h-2.5 text-rose-600" />
-                            فشلت
+                            {item.failureStage === 'ocr' ? 'فشل OCR' : item.failureStage === 'deepseek' ? 'فشل DeepSeek' : 'فشلت'}
+                          </span>
+                        )}
+                        {item.deepseekStatus === 'local_fallback' && item.status === 'completed' && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-bold rounded border border-amber-200 shrink-0">
+                            DeepSeek متوقف — مقارنة محلية
                           </span>
                         )}
                       </div>
                       <p className="text-[11px] text-slate-500 truncate mt-0.5">
                         {item.processedByProject ? `القاعدة: ${item.processedByProject.name} • ` : ''}
                         الجواب: {item.extractedAnswer || 'لا يوجد نص'}
+                        {item.requestId ? ` • رقم الطلب: ${item.requestId}` : ''}
                       </p>
                     </div>
                   </div>
