@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowRight, BellRing, CalendarDays, Mail, RefreshCw, ShieldCheck, UserRound } from 'lucide-react';
 import { CourseReminder, fetchCourseReminders, getStoredAuthToken } from '../api';
+import { SupabaseAdminLogin } from './SupabaseAdminLogin';
 
 interface CourseRemindersDashboardProps {
   onBackToPortal: () => void;
@@ -12,9 +13,19 @@ export const CourseRemindersDashboard: React.FC<CourseRemindersDashboardProps> =
   showToast,
 }) => {
   const [reminders, setReminders] = useState<CourseReminder[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [sessionToken, setSessionToken] = useState(() => getStoredAuthToken());
+  const [isLoading, setIsLoading] = useState(() => Boolean(getStoredAuthToken()));
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const handleSessionChange = useCallback((token: string) => {
+    setSessionToken(token);
+    if (!token) {
+      setReminders([]);
+      setError(null);
+      setIsLoading(false);
+    }
+  }, []);
 
   const loadReminders = useCallback(async (refresh = false) => {
     if (refresh) setIsRefreshing(true);
@@ -22,7 +33,7 @@ export const CourseRemindersDashboard: React.FC<CourseRemindersDashboardProps> =
     setError(null);
 
     try {
-      const result = await fetchCourseReminders(getStoredAuthToken());
+      const result = await fetchCourseReminders(sessionToken);
       setReminders(result.reminders || []);
     } catch (requestError: any) {
       const message = requestError?.message || 'تعذر تحميل تذكيرات الدورات';
@@ -32,11 +43,11 @@ export const CourseRemindersDashboard: React.FC<CourseRemindersDashboardProps> =
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [showToast]);
+  }, [sessionToken, showToast]);
 
   useEffect(() => {
-    void loadReminders();
-  }, [loadReminders]);
+    if (sessionToken) void loadReminders();
+  }, [loadReminders, sessionToken]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col font-sans" dir="rtl">
@@ -63,6 +74,8 @@ export const CourseRemindersDashboard: React.FC<CourseRemindersDashboardProps> =
       </header>
 
       <main className="mx-auto w-full max-w-7xl flex-1 space-y-5 px-4 py-6 sm:px-6 lg:px-8">
+        <SupabaseAdminLogin onSessionChange={handleSessionChange} />
+
         <section className="relative overflow-hidden rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-slate-50 p-5 shadow-sm">
           <div className="pointer-events-none absolute -left-12 -top-12 h-36 w-36 rounded-full bg-emerald-300/20 blur-3xl" />
           <div className="relative flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
