@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import { createHash, randomBytes } from "crypto";
 import { createServer as createViteServer } from "vite";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import dotenv from "dotenv";
@@ -167,7 +168,7 @@ function getEffectiveProjectKeys(idOrProject?: string | OcrProjectRecord | null)
   const id = typeof idOrProject === 'string' ? idOrProject : idOrProject?.id;
   const secrets = id ? getProjectSecrets(id) : {};
   const sRole = (secrets.service_role_key && secrets.service_role_key.trim()) || runtimeServiceRoleKey.trim();
-  const oKey = (secrets.ocr_api_key && secrets.ocr_api_key.trim()) || runtimeDefaultOcrApiKey.trim();
+  const oKey = getServerOcrApiKey(id) || (secrets.ocr_api_key && secrets.ocr_api_key.trim()) || runtimeDefaultOcrApiKey.trim();
   return { serviceRoleKey: sRole, ocrApiKey: oKey };
 }
 
@@ -231,10 +232,22 @@ let inMemoryProjects: OcrProjectRecord[] = [
   },
 ];
 
-// Runtime dynamic keys from server environment
+// Runtime dynamic keys from server environment.
+// Per-base OCR keys are intentionally read only on the server and never returned to clients.
 let runtimeServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.COMMUNITY_SUPABASE_SERVICE_ROLE_KEY || "";
 let runtimeDefaultOcrApiKey = process.env.OCR_API_KEY || "";
-// Single shared DeepSeek API for the entire system
+const serverOcrKeyByProjectId: Record<string, string> = {
+  "107fb657-4bc5-41ca-b0b2-3466337d497e": "OCR_API_KEY_1",
+  "base_02": "OCR_API_KEY_2",
+  "base_03": "OCR_API_KEY_3",
+};
+
+function getServerOcrApiKey(projectId?: string): string {
+  const envName = projectId ? serverOcrKeyByProjectId[projectId] : undefined;
+  return envName ? String(process.env[envName] || "").trim() : "";
+}
+
+// Single shared DeepSeek API for the entire system; it remains server-only.
 let runtimeDeepseekApiKey = process.env.DEEPSEEK_API_KEY || "";
 
 function maskApiKey(key?: string): string | null {
@@ -245,7 +258,7 @@ function maskApiKey(key?: string): string | null {
 function sanitizeProjectForClient(p: OcrProjectRecord | any): ClientSafeOcrProject {
   const secrets = getProjectSecrets(p.id);
   const sRole = (secrets.service_role_key && secrets.service_role_key.trim()) || (p.service_role_key && p.service_role_key.trim()) || runtimeServiceRoleKey.trim();
-  const oKey = (secrets.ocr_api_key && secrets.ocr_api_key.trim()) || (p.ocr_api_key && p.ocr_api_key.trim()) || runtimeDefaultOcrApiKey.trim();
+  const oKey = getServerOcrApiKey(p.id) || (secrets.ocr_api_key && secrets.ocr_api_key.trim()) || (p.ocr_api_key && p.ocr_api_key.trim()) || runtimeDefaultOcrApiKey.trim();
   return {
     id: p.id,
     name: p.name,
@@ -443,9 +456,58 @@ async function handleLeadershipLoadRotation(
   }
 }
 
+const ocrIpFingerprintSalt = randomBytes(32).toString('hex');
+const ocrRateBuckets = new Map<string, { windowStart: number; count: number }>();
+const OCR_RATE_WINDOW_MS = 60_000;
+const OCR_RATE_LIMIT = 12;
+
+function getOcrClientFingerprint(req: express.Request): string {
+  const source = req.ip || req.socket.remoteAddress || 'unknown';
+  return createHash('sha256').update(`${ocrIpFingerprintSalt}:${source}`).digest('hex').slice(0, 24);
+}
+
+function ocrRateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const now = Date.now();
+  const fingerprint = getOcrClientFingerprint(req);
+  const current = ocrRateBuckets.get(fingerprint);
+  const bucket = !current || now - current.windowStart >= OCR_RATE_WINDOW_MS
+    ? { windowStart: now, count: 0 }
+    : current;
+  bucket.count += 1;
+  ocrRateBuckets.set(fingerprint, bucket);
+
+  if (ocrRateBuckets.size > 5000) {
+    for (const [key, value] of ocrRateBuckets) {
+      if (now - value.windowStart >= OCR_RATE_WINDOW_MS) ocrRateBuckets.delete(key);
+    }
+  }
+
+  if (bucket.count > OCR_RATE_LIMIT) {
+    const retryAfter = Math.max(1, Math.ceil((OCR_RATE_WINDOW_MS - (now - bucket.windowStart)) / 1000));
+    res.setHeader('Retry-After', String(retryAfter));
+    return res.status(429).json({
+      success: false,
+      error: 'تم تجاوز عدد محاولات OCR المسموح بها مؤقتًا. حاول بعد قليل.',
+      code: 'OCR_RATE_LIMITED',
+      retry_after_seconds: retryAfter,
+    });
+  }
+
+  next();
+}
+
+async function requireOcrAccess(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const origin = String(req.headers.origin || '').replace(/\/$/, '');
+  const host = String(req.get('host') || '').replace(/\/$/, '');
+  const sameOrigin = origin && host && (origin === `https://${host}` || origin === `http://${host}`);
+  if (sameOrigin) return next();
+  return requireAuth(req as AuthenticatedRequest, res, next);
+}
+
 async function startServer() {
   logSystemSecurityStatus();
   const app = express();
+  app.set('trust proxy', 1);
   const PORT = 3000;
 
   // Support large image payloads
@@ -485,6 +547,7 @@ async function startServer() {
       source = "external_api",
     } = req.body;
 
+    res.setHeader('Cache-Control', 'no-store');
     const actualImage = imageBase64 || image_base64;
     const actualQuestion = (questionText || question_text || question || prompt || "").trim();
     const actualModelAnswer = (modelAnswer || model_answer || "").trim();
@@ -610,7 +673,7 @@ async function startServer() {
     // and the task immediately transfers to the next base in line.
     for (const currentProject of candidateQueue) {
       const attemptStart = Date.now();
-      const { ocrApiKey: effectiveOcrApiKey } = getEffectiveProjectKeys(currentProject);
+      const effectiveOcrApiKey = getServerOcrApiKey(currentProject.id) || getEffectiveProjectKeys(currentProject).ocrApiKey;
 
       try {
         const resOcr = await extractTextFromImage(actualImage, effectiveOcrApiKey, language);
@@ -846,8 +909,8 @@ async function startServer() {
     }
   };
 
-  app.post("/api/v1/ocr/process", processOcrHandler);
-  app.post("/api/ocr/process", processOcrHandler);
+  app.post("/api/v1/ocr/process", requireOcrAccess, ocrRateLimit, processOcrHandler);
+  app.post("/api/ocr/process", requireOcrAccess, ocrRateLimit, processOcrHandler);
 
   app.get("/api/v1/ocr/stats", (req, res) => {
     const leader = inMemoryProjects.find((p) => p.is_current_leader);
@@ -882,6 +945,7 @@ async function startServer() {
     res.json({
       hasServiceRoleKey: Boolean(runtimeServiceRoleKey.trim()),
       hasDefaultOcrKey: Boolean(runtimeDefaultOcrApiKey.trim()),
+      configuredOcrBases: [1, 2, 3].filter((index) => Boolean(String(process.env[`OCR_API_KEY_${index}`] || '').trim())),
       hasDeepseekKey: Boolean(runtimeDeepseekApiKey.trim()),
     });
   });
@@ -903,6 +967,7 @@ async function startServer() {
       success: true,
       hasServiceRoleKey: Boolean(runtimeServiceRoleKey.trim()),
       hasDefaultOcrKey: Boolean(runtimeDefaultOcrApiKey.trim()),
+      configuredOcrBases: [1, 2, 3].filter((index) => Boolean(String(process.env[`OCR_API_KEY_${index}`] || '').trim())),
       hasDeepseekKey: Boolean(runtimeDeepseekApiKey.trim()),
       message: "تم حفظ وتحديث إعدادات المفاتيح في الخادم بنجاح",
     });
@@ -1602,6 +1667,7 @@ async function startServer() {
       hasServiceKey: Boolean(runtimeServiceRoleKey && runtimeServiceRoleKey.trim().length > 0),
       hasDeepseekKey: Boolean(runtimeDeepseekApiKey && runtimeDeepseekApiKey.trim().length > 0),
       hasDefaultOcrKey: Boolean(runtimeDefaultOcrApiKey && runtimeDefaultOcrApiKey.trim().length > 0),
+      configuredOcrBases: [1, 2, 3].filter((index) => Boolean(String(process.env[`OCR_API_KEY_${index}`] || '').trim())),
     });
   });
 

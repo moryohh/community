@@ -32,6 +32,9 @@ export const SERVER_CONFIG = {
   ADMIN_RECOVERY_SECRET_KEY: (process.env.ADMIN_RECOVERY_SECRET_KEY || process.env.COMMUNITY_ADMIN_SECRET || '').trim(),
 
   // OCR Engines & AI Models (Server-side execution only)
+  OCR_API_KEY_1: (process.env.OCR_API_KEY_1 || '').trim(),
+  OCR_API_KEY_2: (process.env.OCR_API_KEY_2 || '').trim(),
+  OCR_API_KEY_3: (process.env.OCR_API_KEY_3 || '').trim(),
   OCR_API_KEY: (process.env.OCR_API_KEY || '').trim(),
   DEEPSEEK_API_KEY: (process.env.DEEPSEEK_API_KEY || '').trim(),
 
@@ -65,7 +68,8 @@ export function logSystemSecurityStatus() {
     hasCommunityServiceRole: Boolean(SERVER_CONFIG.COMMUNITY_SUPABASE_SERVICE_ROLE_KEY),
     hasAuthAUrl: Boolean(SERVER_CONFIG.AUTH_SUPABASE_A_URL),
     hasAuthAAnonKey: Boolean(SERVER_CONFIG.AUTH_SUPABASE_A_ANON_KEY),
-    hasOcrApiKey: Boolean(SERVER_CONFIG.OCR_API_KEY),
+    hasOcrApiKey: Boolean(SERVER_CONFIG.OCR_API_KEY_1 || SERVER_CONFIG.OCR_API_KEY_2 || SERVER_CONFIG.OCR_API_KEY_3 || SERVER_CONFIG.OCR_API_KEY),
+    configuredOcrBases: [SERVER_CONFIG.OCR_API_KEY_1, SERVER_CONFIG.OCR_API_KEY_2, SERVER_CONFIG.OCR_API_KEY_3].filter(Boolean).length,
     hasDeepseekApiKey: Boolean(SERVER_CONFIG.DEEPSEEK_API_KEY),
     allowedOriginsCount: SERVER_CONFIG.COMMUNITY_ALLOWED_ORIGINS.length,
   });
