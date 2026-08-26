@@ -38,6 +38,10 @@ import {
   revokeDashboardAdmin,
   restoreDashboardAdmin,
 } from "./server/communityAdminManagementController";
+import {
+  createCourseReminder,
+  listCourseReminders,
+} from "./server/courseReminderController";
 import { communityCorsMiddleware } from "./server/corsMiddleware";
 import { logSystemSecurityStatus } from "./server/config";
 
@@ -3852,7 +3856,10 @@ CREATE POLICY "Allow service all on comments" ON public.comments FOR ALL USING (
   // 7. Submit post report
   app.post("/api/v1/community/posts/:id/reports", requireAuth as any, reportPost as any);
   
-  // 8. Media Upload Contract (Cloudflare R2)
+  // 8. Course reminder registration (Authenticated student; identity comes from Supabase A JWT)
+  app.post("/api/v1/community/course-reminders", requireAuth as any, createCourseReminder as any);
+
+  // 9. Media Upload Contract (Cloudflare R2)
   app.post("/api/v1/community/media/presign", requireAuth as any, presignMediaUpload as any);
   app.post("/api/v1/community/media/complete", requireAuth as any, completeMediaUpload as any);
   app.post("/api/v1/community/media/upload", requireAuth as any, presignMediaUpload as any); // Backward compatibility
@@ -3888,6 +3895,9 @@ CREATE POLICY "Allow service all on comments" ON public.comments FOR ALL USING (
 
   // 17. Restore Revoked Admin (Validates 3 seats limit)
   app.patch("/api/v1/community/admin/admins/:userId/restore", requireAdmin as any, restoreDashboardAdmin as any);
+
+  // 18. Course reminder interest list (Admin only; contains verified student contact details)
+  app.get("/api/v1/community/admin/course-reminders", requireAdmin as any, listCourseReminders as any);
 
   // ==========================================
 

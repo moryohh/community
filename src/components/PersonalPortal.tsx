@@ -14,6 +14,9 @@ import {
   Cpu,
   Zap,
   TrendingUp,
+  BellRing,
+  Mail,
+  User,
   ExternalLink,
   Code2,
   CheckCircle2,
@@ -21,7 +24,7 @@ import {
 import { OcrProject, SupabaseConnectionStatus, SystemKeysStatus } from '../types';
 
 interface PersonalPortalProps {
-  onNavigate: (view: 'ocr' | 'community') => void;
+  onNavigate: (view: 'ocr' | 'community' | 'course_reminders') => void;
   projects: OcrProject[];
   connectionStatus: SupabaseConnectionStatus | null;
   keysStatus: SystemKeysStatus;
@@ -58,7 +61,7 @@ export const PersonalPortal: React.FC<PersonalPortalProps> = ({
                 </span>
               </h1>
               <p className="text-xs text-slate-500">
-                بوابة الوصول لمنظومة معالجة الـ OCR ومنصة المجتمع التفاعلية
+                بوابة الوصول لمنظومة OCR والمجتمع وإدارة تذكيرات الدورات التعليمية
               </p>
             </div>
           </div>
@@ -82,7 +85,7 @@ export const PersonalPortal: React.FC<PersonalPortalProps> = ({
           مرحباً بك في لوحة تحكمك الشخصية
         </h2>
         <p className="text-sm sm:text-base text-slate-600 max-w-2xl mx-auto leading-relaxed">
-          تم تصميم هذه المساحة كمدخل موحد للوصول السريع إلى أدوات معالجة الـ OCR وتوزيع الحمل بين القواعد، ومساحة المجتمع التفاعلية لمشاركة الخبرات والنماذج.
+          تم تصميم هذه المساحة كمدخل موحد للوصول إلى أدوات OCR، ومساحة المجتمع، وإدارة اهتمام الطلاب بالدورات التعليمية.
         </p>
       </div>
 
@@ -226,13 +229,70 @@ export const PersonalPortal: React.FC<PersonalPortalProps> = ({
               <div className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 group-hover:bg-blue-700 text-white text-xs font-bold shadow-md shadow-blue-600/20 group-hover:translate-x-[-2px] transition-all">
                 <span>الدخول إلى مجتمع الفيسبوك</span>
                 <ArrowLeft className="w-4 h-4" />
+                </div>
               </div>
             </div>
+
+            {/* CARD 3: COURSE REMINDERS */}
+            <div
+              id="card-course-reminders"
+              onClick={() => onNavigate('course_reminders')}
+              className="group relative overflow-hidden rounded-3xl border-2 border-emerald-200 bg-white p-7 flex flex-col justify-between cursor-pointer transition-all duration-300 hover:border-emerald-500 hover:shadow-2xl hover:shadow-emerald-500/10"
+            >
+              <div className="absolute left-0 right-0 top-0 h-2 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 transition-all group-hover:h-2.5" />
+              <div className="space-y-5">
+                <div className="flex items-start justify-between">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600 shadow-inner transition-all duration-300 group-hover:scale-105 group-hover:bg-emerald-600 group-hover:text-white">
+                    <BellRing className="h-8 w-8" />
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+                    <Shield className="h-3.5 w-3.5 text-emerald-600" />
+                    إدارة خاصة
+                  </span>
+                </div>
+
+                <div>
+                  <h3 className="flex items-center gap-2 text-xl font-bold text-slate-900 transition-colors group-hover:text-emerald-700">
+                    <span>إدارة الدورات</span>
+                    <span className="font-mono text-xs font-medium text-slate-400">(تذكيرات الطلاب)</span>
+                  </h3>
+                  <p className="mt-2 text-xs leading-relaxed text-slate-600 sm:text-sm">
+                    تابع عدد الطلاب المهتمين بدورة شهر تشرين الثاني، واعرض أسماءهم وبريدهم ومعرّفاتهم بعد تسجيل تذكير موثق.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-3 text-xs text-slate-600">
+                  <div className="flex items-center gap-1.5">
+                    <BellRing className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    <span>تذكيرات التقديم</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <User className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    <span>هوية موثقة</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Mail className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    <span>بريد الطالب</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Database className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    <span>سجل منظم</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 flex items-center justify-between border-t border-slate-100 pt-5">
+                <span className="text-xs font-semibold text-slate-500">محمي بصلاحية المشرف</span>
+                <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-emerald-600/20 transition-all group-hover:bg-emerald-700 group-hover:translate-x-[-2px]">
+                  <span>فتح إدارة الدورات</span>
+                  <ArrowLeft className="h-4 w-4" />
+                </div>
+              </div>
+            </div>
+
           </div>
 
-        </div>
-
-        {/* Quick System Summary Footer Widget */}
+          {/* Quick System Summary Footer Widget */}
         <div className="mt-8 bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 text-xs">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-xl bg-slate-100 flex items-center justify-center text-slate-700 shrink-0">

@@ -31,6 +31,7 @@ import { BaseTestingModal } from './components/BaseTestingModal';
 import { BaseErrorsModal } from './components/BaseErrorsModal';
 import { PersonalPortal } from './components/PersonalPortal';
 import { CommunityHub } from './components/CommunityHub';
+import { CourseRemindersDashboard } from './components/CourseRemindersDashboard';
 import {
   OcrProject,
   SystemSettings,
@@ -50,7 +51,7 @@ const DEFAULT_SETTINGS: SystemSettings = {
 
 export function App() {
   // Navigation view: 'portal' (الصفحة الشخصية) | 'ocr' (أداة OCR) | 'community' (المجتمع)
-  const [currentView, setCurrentView] = useState<'portal' | 'ocr' | 'community'>('portal');
+  const [currentView, setCurrentView] = useState<'portal' | 'ocr' | 'community' | 'course_reminders'>('portal');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'api_gateway' | 'sandbox'>('dashboard');
   const [projects, setProjects] = useState<OcrProject[]>([]);
   const [incomingTasks, setIncomingTasks] = useState<OcrComparisonResult[]>([]);
@@ -464,7 +465,15 @@ export function App() {
         />
       )}
 
-      {/* VIEW 3: Full OCR Management & Routing Tool */}
+      {/* VIEW 3: Course reminder management (separate from OCR and Community) */}
+      {currentView === 'course_reminders' && (
+        <CourseRemindersDashboard
+          onBackToPortal={() => setCurrentView('portal')}
+          showToast={showToast}
+        />
+      )}
+
+      {/* VIEW 4: Full OCR Management & Routing Tool */}
       {currentView === 'ocr' && (
         <div className="flex flex-col min-h-screen">
           {/* Header with Navigation Tabs */}

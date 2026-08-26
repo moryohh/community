@@ -892,3 +892,29 @@ export async function importCommunityJsonData(
 
 
 
+
+
+export interface CourseReminder {
+  id: string;
+  course_id: string;
+  course_title: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function fetchCourseReminders(token?: string): Promise<{
+  success: boolean;
+  count: number;
+  reminders: CourseReminder[];
+}> {
+  const headers = getAuthHeaders(token);
+  const res = await fetch('/api/v1/community/admin/course-reminders', { headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || 'فشل جلب تذكيرات الدورات');
+  }
+  return data;
+}
