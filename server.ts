@@ -496,6 +496,7 @@ async function startServer() {
       return res.status(400).json({
         success: false,
         request_id: actualRequestId,
+        failure_stage: 'validation',
         error: "Missing required parameter: imageBase64 (الصورة مطلوبة لمعالجة OCR)",
       });
     }
@@ -504,6 +505,7 @@ async function startServer() {
       return res.status(400).json({
         success: false,
         request_id: actualRequestId,
+        failure_stage: 'validation',
         error: "Missing required parameter: questionText (نص السؤال مطلوب لمقارنة الجواب)",
       });
     }
